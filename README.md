@@ -16,6 +16,7 @@ The Risk Analysis is a Next.js web application designed to parse, analyze, and v
 - **Language**: [TypeScript](https://www.typescriptlang.org/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **UI Components**: [Shadcn/ui](https://ui.shadcn.com/)
+- **Dashboard Boilerplate**: [Shadcn/blocks](https://ui.shadcn.com/blocks/)
 
 ## 🚀 Getting Started
 
@@ -124,7 +125,7 @@ For true scalability and to handle datasets that cannot fit into memory, migrati
   - **Performance**: Database queries with proper indexing are far more efficient for filtering, sorting, and paginating data than in-memory operations.
   - **Data Management**: Simplifies data updates and management without needing to replace a large JSON file.
 
-### 4. Limit Data by Using Date Ranges
+### 3. Limit Data by Using Date Ranges
 
 The current UI loads and processes the entire dataset. For very large log files, this can be slow and inefficient. A powerful improvement would be to allow users to filter the data by a specific date range.
 
@@ -136,7 +137,7 @@ The current UI loads and processes the entire dataset. For very large log files,
   - **Improved Performance**: Reduces the amount of data processed and sent to the client, leading to faster page loads.
   - **Enhanced User Experience**: Allows users to focus their analysis on specific time periods, making it easier to investigate incidents.
 
-### 5. Robust Error Handling and Logging
+### 4. Robust Error Handling and Logging
 
 The current implementation in `getAllAuditData` logs parsing errors for individual records to the console. In a production environment, these transient errors should be captured for analysis without failing the entire data-loading process.
 
@@ -148,7 +149,7 @@ The current implementation in `getAllAuditData` logs parsing errors for individu
   - **Resilience**: The application can handle malformed records gracefully without crashing or losing all data.
   - **Analytics & Debugging**: Provides a persistent log of data quality issues, which can be used to debug the data source or improve the parser over time.
 
-### 6. Add Unit Tests
+### 5. Add Unit Tests
 
 To improve code quality and prevent regressions, a comprehensive suite of unit tests should be added.
 
