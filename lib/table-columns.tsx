@@ -59,7 +59,7 @@ export const allRiskColumns: ColumnDef<Record>[] = [
       <DataTableColumnHeader column={column} title="Created" />
     ),
     cell: ({ row }) => (
-      <span className="block truncate max-w-[200px]">
+      <span className="block">
         {parseWithDateFns(row.original.created).formattedDate}
       </span>
     ),
@@ -148,7 +148,7 @@ export const userColumns: ColumnDef<UserRecord>[] = [
       <DataTableColumnHeader column={column} title="Created" />
     ),
     cell: ({ row }) => (
-      <span className="block truncate max-w-[200px]">
+      <span className="block">
         {parseWithDateFns(row.original.created).formattedDate}
       </span>
     ),

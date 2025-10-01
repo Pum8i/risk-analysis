@@ -2,7 +2,6 @@
 
 import {
   IconAlertCircle,
-  IconBriefcase,
   IconDashboard,
   IconMeteor,
   IconUserQuestion,
@@ -27,11 +26,12 @@ const data = {
       url: "/dashboard",
       icon: IconDashboard,
     },
-    {
-      title: "All Data",
-      url: "/all-data",
-      icon: IconBriefcase,
-    },
+    // Taking far too long to load with large datasets - can put back with proper data loading. See README.md recommendations.
+    // {
+    //   title: "All Data",
+    //   url: "/all-data",
+    //   icon: IconBriefcase,
+    // },
     {
       title: "At Risk Users",
       url: "/at-risk-users",

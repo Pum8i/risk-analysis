@@ -3,16 +3,19 @@
 import {
   AuditDataRaw,
   AuditStatistics,
-  Record,
+  Record as AuditRecord,
+  RiskByHour,
   RiskData,
   User,
+  UserRecord,
 } from "@/lib/types";
 import { promises as fs } from "fs";
 import path from "path";
+import { parseWithDateFns } from "./utils";
 import { cache } from "react";
 
-// Keeping in memory as it's a large dataset. We would act differently if we were to get it from a DB.
-let memoizedAuditData: Record[] | null = null;
+// Cache in memory as it's a large dataset. Prevents re-process data on every page load/api request. We would act differently if we were to get it from a DB.
+let memoizedAuditData: AuditRecord[] | null = null;
 let memoizedAuditDataMTime: number | null = null;
 
 // Check when file was last modified
@@ -21,9 +24,8 @@ async function getFileMTime(filePath: string): Promise<number> {
   return stats.mtimeMs;
 }
 
-export const getAllAuditData = cache(async (): Promise<Record[]> => {
+const loadAndParseAuditData = async (): Promise<AuditRecord[]> => {
   try {
-    // const filePath = path.join(process.cwd(), "data/audit_small.json");
     const filePath = path.join(process.cwd(), "data/audit.json");
     const fileMTime = await getFileMTime(filePath);
 
@@ -33,7 +35,6 @@ export const getAllAuditData = cache(async (): Promise<Record[]> => {
     }
 
     console.log("Reloading audit data...");
-
     const fileContents = await fs.readFile(filePath, "utf-8");
     const data = JSON.parse(fileContents) as AuditDataRaw;
 
@@ -42,26 +43,25 @@ export const getAllAuditData = cache(async (): Promise<Record[]> => {
       return [];
     }
 
-    const parsedData = data.RECORDS.map((record) => {
+    const parsedData: AuditRecord[] = [];
+    for (const record of data.RECORDS) {
       try {
-        // n.b JSON.parse is a big performance hit on large datasets.
-        const { browser_uuid, content, ip_external, ip_internal, user_agent } =
-          JSON.parse(record.meta);
+        const meta = JSON.parse(record.meta);
 
-        return {
+        parsedData.push({
           ...record,
-          browserId: browser_uuid,
+          browserId: meta.browser_uuid,
           riskLevel: parseInt(record.risk_level, 10) || 0,
-          content,
-          ipExternal: ip_external,
-          ipInternal: ip_internal,
-          userAgent: user_agent,
-        };
+          content: meta.content,
+          ipExternal: meta.ip_external,
+          ipInternal: meta.ip_internal,
+          userAgent: meta.user_agent,
+        });
       } catch (e) {
         // In Prod - send error to Error table for later analysis
         console.error(`Failed to parse meta for record ID: ${record.id}`, e);
       }
-    }) as Record[];
+    }
 
     memoizedAuditData = parsedData;
     memoizedAuditDataMTime = fileMTime;
@@ -71,7 +71,10 @@ export const getAllAuditData = cache(async (): Promise<Record[]> => {
     console.error("Failed to read or parse audit data:", error);
     return [];
   }
-});
+};
+
+// Cache the function to avoid reloading the data multiple times per request
+export const getAllAuditData = cache(loadAndParseAuditData);
 
 export async function getAuditStatistics(): Promise<AuditStatistics> {
   const defaultStats: AuditStatistics = {
@@ -116,25 +119,44 @@ export async function getRiskData(): Promise<RiskData> {
   };
 
   try {
-    const riskData = await getAllAuditData();
-    const atRiskRecords = riskData.filter((record) => record.riskLevel > 0);
+    const allData = await getAllAuditData();
+    const atRiskRecords: AuditRecord[] = [];
 
-    if (!atRiskRecords || atRiskRecords.length === 0) return defaultRiskData;
+    // Create a map of users to allow us to group records by browserId & sum their total risk
+    const users: Record<
+      string,
+      { browserId: string; records: AuditRecord[]; totalRisk: number }
+    > = {};
 
-    // Group records by browserId.
-    const usersWithRecords = Object.groupBy(
-      atRiskRecords,
-      (record) => record.browserId
+    for (const record of allData) {
+      if (record.riskLevel > 0) {
+        atRiskRecords.push(record);
+
+        // We don't have a user yet, add a default one
+        if (!users[record.browserId]) {
+          users[record.browserId] = {
+            browserId: record.browserId,
+            records: [],
+            totalRisk: 0,
+          };
+        }
+
+        // Now we have a user, push the record and add sum the totalRisk
+        users[record.browserId].records.push(record);
+        users[record.browserId].totalRisk += record.riskLevel;
+      }
+    }
+
+    // There's no risk data to return, so return an empty object
+    if (atRiskRecords.length === 0) {
+      return defaultRiskData;
+    }
+
+    // Get a sorted array of users
+    const atRiskUsers = Object.values(users).sort(
+      (a, b) => b.totalRisk - a.totalRisk
     );
 
-    // Transform the grouped data into the AtRiskUser[] structure and sort.
-    const atRiskUsers = Object.entries(usersWithRecords)
-      .map(([browserId, records]) => ({
-        browserId,
-        records: records || [],
-        totalRisk: (records || []).reduce((sum, r) => sum + r.riskLevel, 0),
-      }))
-      .sort((a, b) => b.totalRisk - a.totalRisk);
     return {
       allRisks: atRiskRecords,
       allRisksCount: atRiskRecords.length,
@@ -150,33 +172,74 @@ export async function getRiskData(): Promise<RiskData> {
 export async function getUserProfileByBrowserId(
   browserId: string
 ): Promise<User> {
-  const defaultUser: User = { browserId, records: [], totalRisk: 0 };
+  const defaultUser: User = {
+    browserId,
+    records: [],
+    totalRisk: 0,
+    riskByHour: [],
+    risksTypes: [],
+  };
 
   try {
     const allData = await getAllAuditData();
 
-    // Filter for records with browserId
-    const browserRecords = allData.filter((r) => r.browserId === browserId);
-
-    if (!browserRecords || browserRecords.length === 0) return defaultUser;
-
-    // Sum all riskLevel's to get the total riskLevel
-    const totalRisk = browserRecords.reduce((sum, r) => sum + r.riskLevel, 0);
-
-    // Flatten records for ease of use and only adding properties we'er using
-    const records = browserRecords.map((record) => ({
-      id: record.id,
-      created: record.created,
-      riskLevel: record.riskLevel,
-      risk: record.risk,
-      content: record.content,
-      userAgent: record.userAgent,
-      ipExternal: record.ipExternal,
-      ipInternal: record.ipInternal,
-      // Could add active here - but not sure there's much point
+    let totalRisk = 0;
+    // Create an object for each hour of the day. Used for chart axis.
+    const riskByHourData: RiskByHour[] = Array.from({ length: 24 }, (_, i) => ({
+      hour: i.toString(),
+      risks: {},
     }));
 
-    return { browserId, totalRisk, records };
+    // Get unique risks for this user - used when defining the chart.
+    const riskTypes = new Set<string>();
+    const records: UserRecord[] = [];
+
+    for (const record of allData) {
+      if (record.browserId === browserId) {
+        totalRisk += record.riskLevel;
+
+        // Group records by hour and sum the risk level for chart data.
+        if (record.riskLevel > 0) {
+          riskTypes.add(record.risk);
+
+          // Get risk data by hour. Used for populating the chart.
+          const { date } = parseWithDateFns(record.created);
+          const hour = date.getHours();
+
+          const risk = riskByHourData[hour].risks[record.risk];
+          if (!risk) {
+            riskByHourData[hour].risks[record.risk] = 1;
+          } else {
+            riskByHourData[hour].risks[record.risk]++;
+          }
+        }
+
+        // Flatten records for ease of use
+        records.push({
+          id: record.id,
+          created: record.created,
+          riskLevel: record.riskLevel,
+          risk: record.risk,
+          content: record.content,
+          userAgent: record.userAgent,
+          ipExternal: record.ipExternal,
+          ipInternal: record.ipInternal,
+        });
+      }
+    }
+
+    // There's no records or this user - so return an empty user object
+    if (records.length === 0) {
+      return defaultUser;
+    }
+
+    return {
+      browserId,
+      totalRisk,
+      records,
+      riskByHour: Object.values(riskByHourData),
+      risksTypes: Array.from(riskTypes),
+    };
   } catch (error) {
     console.error(`Failed to get data for browserId ${browserId}:`, error);
     return defaultUser;

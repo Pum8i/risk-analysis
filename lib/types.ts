@@ -47,7 +47,19 @@ export interface User {
   browserId: string;
   totalRisk: number;
   records: UserRecord[];
+  riskByHour: RiskByHour[];
+  risksTypes: string[];
 }
+
+export interface RiskByHour {
+  hour: string;
+  risks: RiskByHourDetails;
+}
+
+export interface RiskByHourDetails {
+  [risk: string]: number;
+}
+
 export interface UserRecord {
   id: string;
   created: string;
